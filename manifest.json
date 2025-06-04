@@ -9,7 +9,7 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://gemini.google.com/*"],
+      "matches": ["https://gemini.google.com/*", "https://claude.ai/*"],
       "js": ["content.js"]
     }
   ],
@@ -22,7 +22,7 @@
       "resources": [
         "selectors/*.json"
       ],
-      "matches": ["https://gemini.google.com/*"]
+      "matches": ["https://gemini.google.com/*", "https://claude.ai/*"]
     }
   ]
 }

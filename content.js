@@ -12,8 +12,18 @@ class GeminiSelectorConfig {
 
   async loadConfig(version = this.currentVersion) {
     try {
-      // Chrome extension can load bundled JSON files
-      const configUrl = chrome.runtime.getURL(`selectors/gemini-selectors-${version}.json`);
+      // Handle platform-specific naming
+      let configFile;
+      if (version.startsWith('claude-')) {
+        configFile = `selectors/${version.replace('claude-', 'claude-selectors-')}.json`;
+      } else if (version.startsWith('gemini-')) {
+        configFile = `selectors/${version.replace('gemini-', 'gemini-selectors-')}.json`;
+      } else {
+        // Legacy format
+        configFile = `selectors/gemini-selectors-${version}.json`;
+      }
+      
+      const configUrl = chrome.runtime.getURL(configFile);
       const response = await fetch(configUrl);
       this.config = await response.json();
       console.log(`✅ Loaded selector config ${this.config.version}: ${this.config.description}`);
@@ -21,8 +31,8 @@ class GeminiSelectorConfig {
     } catch (error) {
       console.error(`❌ Failed to load config ${version}:`, error);
       
-      // Fallback to default version
-      if (version !== "v1") {
+      // Fallback to default version for legacy support
+      if (version !== "v1" && !version.includes('-')) {
         console.log("⚠️ Falling back to v1 config...");
         return this.loadConfig("v1");
       }
@@ -94,14 +104,29 @@ class GeminiSelectorConfig {
   }
 }
 
-// Initialize configuration system
+// Initialize configuration system with platform detection
 async function initializeSelectorConfig() {
   if (!selectorConfig) {
     selectorConfig = new GeminiSelectorConfig();
     
-    // Try to load the latest config, fallback to v1 if needed
-    const configLoaded = await selectorConfig.loadConfig("v2") || 
-                         await selectorConfig.loadConfig("v1");
+    // Platform detection
+    const isClaudeAI = window.location.href.includes('claude.ai');
+    const isGemini = window.location.href.includes('gemini.google.com');
+    
+    let configLoaded = false;
+    
+    if (isClaudeAI) {
+      console.log('🔵 Detected Claude.ai platform');
+      configLoaded = await selectorConfig.loadConfig('claude-v1');
+    } else if (isGemini) {
+      console.log('🟢 Detected Gemini platform');
+      configLoaded = await selectorConfig.loadConfig('gemini-v2') || 
+                     await selectorConfig.loadConfig('gemini-v1');
+    } else {
+      console.log('⚪ Unknown platform, trying Gemini configs');
+      configLoaded = await selectorConfig.loadConfig('gemini-v2') || 
+                     await selectorConfig.loadConfig('gemini-v1');
+    }
     
     if (!configLoaded) {
       console.error("❌ Failed to load any selector configuration!");
@@ -230,8 +255,27 @@ async function extractConversationTitle() {
   console.log('🔍 Extracting conversation title using configurable selectors...');
 
   const config = await initializeSelectorConfig();
+  const titleConfig = config.config.selectors.title;
   
-  // Get current conversation ID from URL
+  // Check if this platform uses page title extraction
+  if (titleConfig.pageTitle) {
+    const pageTitle = document.title;
+    console.log('📜 Page title approach - title:', pageTitle);
+    
+    if (titleConfig.pageTitlePattern) {
+      const regex = new RegExp(titleConfig.pageTitlePattern);
+      const match = pageTitle.match(regex);
+      if (match && match[1]) {
+        console.log(`✅ Extracted title from page: "${match[1]}"`);
+        return match[1].trim();
+      }
+    } else {
+      // Just return the page title as-is
+      return pageTitle;
+    }
+  }
+  
+  // Fallback to sidebar-based extraction (Gemini style)
   const currentUrl = window.location.href;
   const currentId = currentUrl.split('/').pop();
   console.log('📍 Current conversation ID:', currentId);
@@ -252,13 +296,21 @@ async function extractConversationTitle() {
     const item = conversationItems[i];
     const text = item.innerText?.trim();
 
-    // Try primary pattern first
-    const primaryAttrValue = item.getAttribute(attribute);
-    const primarySearchPattern = pattern.replace('{id}', currentId);
-    
-    if (primaryAttrValue && primaryAttrValue.includes(primarySearchPattern)) {
-      console.log(`✅ Found matching conversation (primary): "${text}"`);
+    // For Claude: check if the href matches current conversation
+    if (item.href && item.href.includes(currentId)) {
+      console.log(`✅ Found matching conversation by URL: "${text}"`);
       return text;
+    }
+
+    // For Gemini: try pattern matching
+    if (attribute && pattern) {
+      const primaryAttrValue = item.getAttribute(attribute);
+      const primarySearchPattern = pattern.replace('{id}', currentId);
+      
+      if (primaryAttrValue && primaryAttrValue.includes(primarySearchPattern)) {
+        console.log(`✅ Found matching conversation (primary): "${text}"`);
+        return text;
+      }
     }
 
     // Try fallback pattern if available
@@ -275,7 +327,7 @@ async function extractConversationTitle() {
 
   console.log('❌ No matching conversation found in sidebar');
 
-  // Fallback: try to generate title from first user message using configurable selectors
+  // Final fallback: try to generate title from first user message
   const fallbackSelectors = config.getSelectors('title', 'fallbackSelectors');
   for (const selector of fallbackSelectors) {
     const firstUserMessage = document.querySelector(selector);
@@ -460,19 +512,63 @@ async function extractCurrentChatData() {
 
     // Extract messages using configurable selectors
     const messages = [];
-    const turnContainers = config.querySelector('conversation', 'containers');
-
-    console.log(`📝 Found ${turnContainers.length} conversation containers`);
-
-    turnContainers.forEach((turnElement, turnIndex) => {
-      // Extract user message using configurable selectors
-      const userQueryElements = config.querySelector('messages', 'userQuery', turnElement);
+    
+    // Check if this platform uses flat message structure (Claude) or nested (Gemini)
+    const platformConfig = config.config.selectors.platform;
+    const isFlat = platformConfig?.messageStructure === 'flat';
+    
+    if (isFlat) {
+      // Claude-style: each message element is a complete message
+      const userMessages = config.querySelector('conversation', 'userMessages');
+      const assistantMessages = config.querySelector('conversation', 'assistantMessages');
       
-      for (const userQueryElement of userQueryElements) {
-        const userTextElements = config.querySelector('messages', 'userText', userQueryElement);
+      console.log(`📝 Found ${userMessages.length} user messages, ${assistantMessages.length} assistant messages`);
+      
+      // Combine and sort all messages by DOM order
+      const allMessages = [...userMessages, ...assistantMessages];
+      allMessages.sort((a, b) => {
+        return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      });
+      
+      allMessages.forEach((messageElement, index) => {
+        const isUser = messageElement.classList.contains('font-user-message');
+        const content = messageElement.innerText?.trim();
         
-        for (const userTextElement of userTextElements) {
-          const content = userTextElement.innerText?.trim();
+        if (content) {
+          messages.push({
+            role: isUser ? 'user' : 'assistant',
+            content: content,
+            timestamp: new Date().toISOString(),
+            element_id: messageElement.id || `${isUser ? 'user' : 'assistant'}-message-${index}-${Date.now()}`,
+            element_classes: messageElement.className || '',
+            word_count: content.split(/\s+/).filter(word => word.length > 0).length
+          });
+        }
+      });
+    } else {
+      // Gemini-style: nested message structure
+      const turnContainers = config.querySelector('conversation', 'containers');
+      console.log(`📝 Found ${turnContainers.length} conversation containers`);
+      
+      turnContainers.forEach((turnElement, turnIndex) => {
+        // Extract user message using configurable selectors
+        const userQueryElements = config.querySelector('messages', 'userQuery', turnElement);
+        
+        for (const userQueryElement of userQueryElements) {
+          let content = '';
+          
+          // Try nested structure first (Gemini style)
+          const userTextElements = config.querySelector('messages', 'userText', userQueryElement);
+          if (userTextElements.length > 0) {
+            for (const userTextElement of userTextElements) {
+              content = userTextElement.innerText?.trim();
+              if (content) break;
+            }
+          } else {
+            // Direct content (Claude style)
+            content = userQueryElement.innerText?.trim();
+          }
+          
           if (content) {
             messages.push({
               role: 'user',
@@ -485,35 +581,61 @@ async function extractCurrentChatData() {
             break;
           }
         }
-        if (messages.length > 0 && messages[messages.length - 1].role === 'user') break;
-      }
 
-      // Extract model response using configurable selectors
-      const modelResponseElements = config.querySelector('messages', 'modelResponse', turnElement);
-      
-      for (const modelResponseElement of modelResponseElements) {
-        const contentElements = config.querySelector('messages', 'modelContent', modelResponseElement);
+        // Extract model response using configurable selectors
+        const modelResponseElements = config.querySelector('messages', 'modelResponse', turnElement);
         
-        for (const contentWrapper of contentElements) {
-          const tempContentDiv = document.createElement('div');
-          tempContentDiv.innerHTML = contentWrapper.innerHTML;
-
-          // Handle code blocks using configurable selectors
-          const codeBlockSelectors = config.getSelectors('messages', 'codeBlocks');
-          const codeBlockSelector = codeBlockSelectors.join(', ');
-          const codeBlocks = tempContentDiv.querySelectorAll(codeBlockSelector);
+        for (const modelResponseElement of modelResponseElements) {
+          let content = '';
           
-          codeBlocks.forEach((block) => {
-            const codeContent = block.innerText || block.textContent || '';
-            const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
-            block.parentNode.replaceChild(preformattedText, block);
-          });
+          // Try nested structure first (Gemini style)
+          const contentElements = config.querySelector('messages', 'modelContent', modelResponseElement);
+          if (contentElements.length > 0) {
+            for (const contentWrapper of contentElements) {
+              const tempContentDiv = document.createElement('div');
+              tempContentDiv.innerHTML = contentWrapper.innerHTML;
 
-          let content = tempContentDiv.innerText.trim();
-          content = content
-            .replace(/\n\s*\n\s*\n/g, '\n\n')
-            .replace(/Analysis\s*Analysis/g, 'Analysis')
-            .trim();
+              // Handle code blocks using configurable selectors
+              const codeBlockSelectors = config.getSelectors('messages', 'codeBlocks');
+              const codeBlockSelector = codeBlockSelectors.join(', ');
+              const codeBlocks = tempContentDiv.querySelectorAll(codeBlockSelector);
+              
+              codeBlocks.forEach((block) => {
+                const codeContent = block.innerText || block.textContent || '';
+                const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
+                block.parentNode.replaceChild(preformattedText, block);
+              });
+
+              content = tempContentDiv.innerText.trim();
+              content = content
+                .replace(/\n\s*\n\s*\n/g, '\n\n')
+                .replace(/Analysis\s*Analysis/g, 'Analysis')
+                .trim();
+              
+              if (content) break;
+            }
+          } else {
+            // Direct content (Claude style)
+            const tempContentDiv = document.createElement('div');
+            tempContentDiv.innerHTML = modelResponseElement.innerHTML;
+
+            // Handle code blocks
+            const codeBlockSelectors = config.getSelectors('messages', 'codeBlocks');
+            const codeBlockSelector = codeBlockSelectors.join(', ');
+            const codeBlocks = tempContentDiv.querySelectorAll(codeBlockSelector);
+            
+            codeBlocks.forEach((block) => {
+              const codeContent = block.innerText || block.textContent || '';
+              const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
+              block.parentNode.replaceChild(preformattedText, block);
+            });
+
+            content = tempContentDiv.innerText.trim();
+            content = content
+              .replace(/\n\s*\n\s*\n/g, '\n\n')
+              .replace(/Analysis\s*Analysis/g, 'Analysis')
+              .trim();
+          }
 
           if (content) {
             messages.push({
@@ -527,9 +649,8 @@ async function extractCurrentChatData() {
             break;
           }
         }
-        if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') break;
-      }
-    });
+      });
+    }
 
     // Extract title using configurable approach
     let title = await extractConversationTitle();

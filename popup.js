@@ -21,8 +21,8 @@ document.addEventListener('DOMContentLoaded', function () {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-      if (!tab.url.includes('gemini.google.com')) {
-        showStatus('Please navigate to Gemini website first', 'error');
+      if (!tab.url.includes('gemini.google.com') && !tab.url.includes('claude.ai')) {
+        showStatus('Please navigate to Gemini or Claude website first', 'error');
         return;
       }
 
@@ -44,8 +44,8 @@ document.addEventListener('DOMContentLoaded', function () {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-      if (!tab.url.includes('gemini.google.com')) {
-        showStatus('Please navigate to Gemini website first', 'error');
+      if (!tab.url.includes('gemini.google.com') && !tab.url.includes('claude.ai')) {
+        showStatus('Please navigate to Gemini or Claude website first', 'error');
         return;
       }
 

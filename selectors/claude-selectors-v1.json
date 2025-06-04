@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "description": "Claude.ai interface selectors - working as of June 2025",
+  "lastTested": "2025-06-03",
+  "claudeVersion": "Current production interface",
+  "selectors": {
+    "conversation": {
+      "containers": ["body"],
+      "sidebarItems": ["a[href*=\"/chat/\"]"],
+      "individualMessages": ["div[class*=\"message\"]"],
+      "userMessages": [".font-user-message"],
+      "assistantMessages": [".font-claude-message"]
+    },
+    "messages": {
+      "userQuery": [".font-user-message"],
+      "userText": [""],
+      "modelResponse": [".font-claude-message"],
+      "modelContent": [""],
+      "codeBlocks": ["pre", "code", ".code-block"]
+    },
+    "scrolling": {
+      "chatHistory": ["main"],
+      "infiniteScroller": [""],
+      "mainContent": ["body"]
+    },
+    "title": {
+      "pageTitle": true,
+      "pageTitlePattern": "^(.*) - Claude$",
+      "conversationIdFromUrl": true,
+      "fallbackSelectors": [
+        ".font-user-message"
+      ]
+    },
+    "platform": {
+      "type": "claude",
+      "messageStructure": "flat"
+    }
+  },
+  "timeouts": {
+    "scrollDelay": 300,
+    "maxScrollAttempts": 8,
+    "stabilityChecks": 2,
+    "totalTimeout": 15000
+  }
+}
