@@ -69,6 +69,16 @@
         ".first-user-message .message-text",
         "user-query div.query-text p.query-text-line"
       ]
+    },
+    "modelInfo": {
+      "nameElement": [
+        "bard-mode-switcher [data-test-id=\"bard-mode-menu-button\"] .logo-pill-label-container > span:first-child"
+      ]
+    },
+
+    "platform": {
+      "type": "gemini",
+      "messageStructure": "nested"
     }
   },
   "timeouts": {

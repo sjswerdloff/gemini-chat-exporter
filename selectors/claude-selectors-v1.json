@@ -31,6 +31,11 @@
         ".font-user-message"
       ]
     },
+    "modelInfo": {
+      "nameElement": [
+        "bard-mode-switcher [data-test-id=\"bard-mode-menu-button\"] .logo-pill-label-container > span:first-child",
+      ]
+    },
     "platform": {
       "type": "claude",
       "messageStructure": "flat"
